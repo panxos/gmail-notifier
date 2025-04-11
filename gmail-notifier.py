@@ -249,15 +249,9 @@ class GmailChecker(QObject):
                 raw_email = msg_data[0][1]
                 msg = email.message_from_bytes(raw_email)
 
-                # Obtener remitente y asunto
-                subject = decode_header(msg['Subject'])[0][0]
-                sender = decode_header(msg['From'])[0][0]
-
-                # Convertir a string si es bytes
-                if isinstance(subject, bytes):
-                    subject = subject.decode()
-                if isinstance(sender, bytes):
-                    sender = sender.decode()
+                # Obtener remitente y asunto con manejo mejorado de codificación
+                subject = self._decode_header_safely(msg['Subject'])
+                sender = self._decode_header_safely(msg['From'])
 
                 # Filtrar solo el nombre del remitente si está disponible
                 if '<' in sender:
@@ -279,6 +273,49 @@ class GmailChecker(QObject):
             error_msg = f"Error al verificar correos: {str(e)}"
             self.error_signal.emit(error_msg)
             return []
+
+    def _decode_header_safely(self, header):
+        """Decodifica los encabezados de correo de manera segura manejando diferentes codificaciones."""
+        if not header:
+            return ""
+        
+        try:
+            # Intentar decodificar usando email.header.decode_header
+            decoded_parts = decode_header(header)
+            result = ""
+            
+            for decoded_text, charset in decoded_parts:
+                # Si es bytes, decodificar con la codificación correcta o fallback a alternativas
+                if isinstance(decoded_text, bytes):
+                    if charset:
+                        try:
+                            # Intentar con la codificación especificada
+                            part = decoded_text.decode(charset)
+                        except (UnicodeDecodeError, LookupError):
+                            # Si falla, intentar con UTF-8
+                            try:
+                                part = decoded_text.decode('utf-8')
+                            except UnicodeDecodeError:
+                                # Si UTF-8 falla, intentar con latin-1 (siempre funciona pero puede mostrar caracteres incorrectos)
+                                part = decoded_text.decode('latin-1')
+                    else:
+                        # Sin codificación especificada, intentar UTF-8 primero
+                        try:
+                            part = decoded_text.decode('utf-8')
+                        except UnicodeDecodeError:
+                            # Fallback a latin-1
+                            part = decoded_text.decode('latin-1')
+                else:
+                    # Ya es un string
+                    part = decoded_text
+                    
+                result += part
+                
+            return result
+            
+        except Exception:
+            # Si todo falla, devolver un valor predeterminado
+            return "[Codificación no soportada]"
 
     def run(self):
         last_check_time = self.settings.get('last_check_time', 0)
